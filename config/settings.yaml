@@ -1,0 +1,13 @@
+# Pipeline Configuration
+storage:
+  raw_data_path: "./data/raw"
+  processed_data_path: "./data/processed"
+
+sources:
+  hurdat:
+    url: "https://www.nhc.noaa.gov/data/hurdat/hurdat2-1851-2023-051124.txt"
+    filename: "hurdat2_atlantic.txt"
+  goes_s3:
+    bucket_name: "noaa-goes16"
+    product_prefix: "ABI-L2-CMIPF/2023/240/12/" # Sample specific day/hour
+    max_files_to_download: 10 # Keep small for M2 Proof of Concept

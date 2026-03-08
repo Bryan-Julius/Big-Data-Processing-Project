@@ -1,0 +1,10 @@
+# Ignore environments and cache
+__pycache__/
+venv/
+.env
+
+# Ignore large data files
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
