@@ -1,7 +1,7 @@
 # Scalable Atmospheric Data Pipeline for Global Tropical Cyclone Intensity Forecasting
 
 ## 1. Project Overview
-Predicting hurricane intensity requires processing high-resolution satellite imagery and atmospheric sensor data. This Big Data project builds a distributed ETL pipeline to ingest, clean, and synchronize disparate meteorological data sources. The ultimate goal is to process unstructured NetCDF imagery and structured tabular data into a distributed feature store (HBase) optimized for downstream Machine Learning (CNN/Transformer) forecasting models.
+This project focuses on building a resilient, distributed data pipeline to process high-volume NetCDF satellite imagery and structured HURDAT2 track data. By utilizing Apache Spark and Parquet encoding, the system normalizes disparate meteorological datasets into a unified Data Lake architecture optimized for high-throughput querying.
 
 ## 2. Current Status (Milestone 2: Initial Implementation)
 This repository currently reflects the **M2 Proof of Concept**.

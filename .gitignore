@@ -2,6 +2,7 @@
 __pycache__/
 venv/
 .env
+.idea/
 
 # Ignore large data files
 data/raw/*
