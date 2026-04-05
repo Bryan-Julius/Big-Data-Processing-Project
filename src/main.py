@@ -1,6 +1,9 @@
 import os
+import sys
 os.environ['HADOOP_HOME'] = 'C:\\hadoop'
 os.environ['PATH'] = 'C:\\hadoop\\bin;' + os.environ['PATH']
+os.environ['PYSPARK_PYTHON'] = sys.executable
+os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
 import yaml
 import logging
 from dotenv import load_dotenv
@@ -9,6 +12,7 @@ from dotenv import load_dotenv
 from fetch.fetch_hurdat import download_hurdat_data
 from fetch.fetch_goes import download_sample_goes_data
 from processing.spark_processor import create_spark_session, process_hurdat_data, query_data_lake
+from processing.nc_processor import process_goes_data
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -53,13 +57,22 @@ def main():
     logging.info(" 2nd Phase: Processing (SPARK)")
     spark = create_spark_session()
 
+    # Process HURDAT2
     hurdat_input = os.path.join(raw_path, hurdat_cfg['filename'])
     process_hurdat_data(spark, hurdat_input, processed_path)
+
+    # Process GOES-16 Imagery
+    process_goes_data(spark, raw_path, processed_path)
 
     # 3rd Phase Query layer (Spark SQL)
 
     logging.info(" 3rd Phase: Query Layer")
     query_data_lake(spark, processed_path)
+
+    # Verify GOES data exists
+    goes_parquet = os.path.join(processed_path, "goes_features.parquet")
+    if os.path.exists(goes_parquet):
+        spark.read.parquet(goes_parquet).show(truncate=False)
 
     # Shut down the Spark cluster cleanly
     spark.stop()
