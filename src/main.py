@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 # Import our custom modules
 from fetch.fetch_hurdat import download_hurdat_data
 from fetch.fetch_goes import download_sample_goes_data
-from processing.spark_processor import create_spark_session, process_hurdat_data
+from processing.spark_processor import create_spark_session, process_hurdat_data, query_data_lake
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -48,13 +48,21 @@ def main():
     )
 
 
-    # Second phase spark processing and data models
+    # 2nd phase spark processing and data models
 
-    logging.info(" Phase 2: PROCESSING (SPARK)")
+    logging.info(" 2nd Phase: Processing (SPARK)")
     spark = create_spark_session()
 
     hurdat_input = os.path.join(raw_path, hurdat_cfg['filename'])
     process_hurdat_data(spark, hurdat_input, processed_path)
+
+    # 3rd Phase Query layer (Spark SQL)
+
+    logging.info(" 3rd Phase: Query Layer")
+    query_data_lake(spark, processed_path)
+
+    # Shut down the Spark cluster cleanly
+    spark.stop()
 
     # Shut down the Spark cluster cleanly
     spark.stop()

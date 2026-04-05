@@ -46,3 +46,34 @@ def process_hurdat_data(spark, input_path, output_path):
     except Exception as e:
         logging.error(f"Spark processing failed: {e}")
         return False
+
+
+
+
+def query_data_lake(spark, processed_path):
+    """Demonstrates the Query Layer using Spark SQL on the Parquet files."""
+    logging.info("Executing Spark SQL validation query...")
+    try:
+        # Load the Parquet files we just created
+        parquet_file = os.path.join(processed_path, "hurdat_features.parquet")
+        df = spark.read.parquet(parquet_file)
+
+        # Create a temporary SQL table in memory
+        df.createOrReplaceTempView("hurricane_data")
+
+        # Run an analytical query (e.g., finding the strongest winds by storm status)
+        query = """
+            SELECT status, COUNT(*) as record_count, MAX(max_wind_knots) as max_wind 
+            FROM hurricane_data 
+            WHERE status != '' 
+            GROUP BY status 
+            ORDER BY max_wind DESC
+        """
+        result = spark.sql(query)
+
+        logging.info("Query Successful! Showing top results:")
+        result.show(truncate=False)
+        return True
+    except Exception as e:
+        logging.error(f"Query Layer failed: {e}")
+        return False
