@@ -1,4 +1,6 @@
 import os
+os.environ['HADOOP_HOME'] = 'C:\\hadoop'
+os.environ['PATH'] = 'C:\\hadoop\\bin;' + os.environ['PATH']
 import yaml
 import logging
 from dotenv import load_dotenv
