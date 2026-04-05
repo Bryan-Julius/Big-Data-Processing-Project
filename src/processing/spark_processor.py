@@ -1,7 +1,7 @@
 import os
 import logging
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, split, trim
+from pyspark.sql.functions import col, split, trim, when
 
 def create_spark_session():
     """Initializes a local Spark Session for Data Lakehouse processing."""
@@ -36,9 +36,30 @@ def process_hurdat_data(spark, input_path, output_path):
             .withColumn("max_wind_knots", trim(split_cols.getItem(6)).cast("integer")) \
             .drop("value") # Drop the messy original column
 
-        # Save to Parquet
+        # Drop rows with malformed strings (nulls after split)
+        # Filter out meteorological missing data placeholders (-99)
+        # Filter out empty or corrupted status strings
+        validated_df = structured_df \
+            .dropna(how="any", subset=["date", "latitude", "longitude", "max_wind_knots"]) \
+            .filter(col("max_wind_knots") > -99) \
+            .filter(col("status") != "")
+
+        # Create a new column categorizing the wind speed (in knots)
+        # Saffir-Simpson Scale
+        engineered_df = validated_df.withColumn(
+            "category",
+            when(col("max_wind_knots") >= 137, "Cat_5")
+            .when(col("max_wind_knots") >= 113, "Cat_4")
+            .when(col("max_wind_knots") >= 96, "Cat_3")
+            .when(col("max_wind_knots") >= 83, "Cat_2")
+            .when(col("max_wind_knots") >= 64, "Cat_1")
+            .otherwise("Non_Hurricane")
+        )
+
+        # Save to Parquet using Multi Level Distributed Partitioning
+        # This will create nested folders: e.g., /status=HU/category=Cat_5/
         target_path = os.path.join(output_path, "hurdat_features.parquet")
-        structured_df.write.mode("overwrite").parquet(target_path)
+        engineered_df.write.mode("overwrite").partitionBy("status", "category").parquet(target_path)
 
         logging.info(f"Successfully processed HURDAT2 data and saved Parquet to: {target_path}")
         return True
@@ -57,6 +78,7 @@ def query_data_lake(spark, processed_path):
         # Load the Parquet files we just created
         parquet_file = os.path.join(processed_path, "hurdat_features.parquet")
         df = spark.read.parquet(parquet_file)
+        df.printSchema()
 
         # Create a temporary SQL table in memory
         df.createOrReplaceTempView("hurricane_data")
