@@ -41,7 +41,7 @@ hurricane_pipeline/
 │   └── main.py                    # End-to-end pipeline orchestrator
 ├── .env                           # Environment variables
 ├── .gitignore                     # Git tracking exclusions
-├── requirements.txt               # Python dependencies
+├── environment.yml               # Python/Conda environment dependencies
 └── README.md                      # Project documentation
 ```
 
@@ -51,19 +51,19 @@ hurricane_pipeline/
 
 ### Prerequisites
 * **Python:** Version 3.11 recommended.
+* **Conda** (Required): Miniconda or Anaconda must be installed to handle complex C-extensions for data processing libraries.
 * **Java:** Java 8 or 11 (required for Apache Spark JVM).
 * **Windows Users (Hadoop Binaries):** To execute Spark file I/O locally on Windows, you must create a `C:\hadoop\bin` directory and place the compiled `winutils.exe` and `hadoop.dll` files inside it. The pipeline automatically sets the environment variables at runtime.
 
 ### Installation
 1. Clone this repository to your local machine.
-2. Create and activate a virtual environment:
+2. Create and activate a conda environment in terminal (If Windows ensure Conda is initialized in powershell)
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   conda env create -f environment.yml
    ```
 3. Install the required dependencies:
    ```bash
-   pip install -r requirements.txt
+   conda activate big-data-env
    ```
 
 **Required Libraries (`requirements.txt`):**
@@ -74,6 +74,7 @@ hurricane_pipeline/
 * `pyspark==3.5.0`
 * `netCDF4==1.6.5`
 * `xarray==2023.10.0`
+* `pandas==2.2.0`
 
 ---
 
@@ -91,7 +92,11 @@ The pipeline is designed to run end-to-end from a single entry point.
 
 1. Open your terminal.
 2. Ensure you are in the root directory of the project.
-3. Execute the main orchestrator:
+3. Ensure Conda is active
+4. ```bash
+   conda activate big-data-env
+   ```
+4. Execute the main orchestrator:
    ```bash
    python src/main.py
    ```
