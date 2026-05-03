@@ -111,12 +111,13 @@ The pipeline is designed to run end-to-end from a single entry point.
    ```
 6. Monitor the console logs for processing metrics and the final Spark SQL validation tables. Processed output will be available in `data/processed/`.
 
----
+
 
 7. Once the pipeline completes, execute the validation script to spin up a Spark SQL engine, verify data quality, and prove the spatial math succeeded:
    ```bash
    python src/validate.py
    ```
+---
 
 
 ## 6. Data Dictionary (Final Schema)
