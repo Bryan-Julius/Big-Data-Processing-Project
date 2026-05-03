@@ -5,6 +5,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, expr, split, trim
 from pyspark.sql.types import StructType, StructField, StringType, FloatType, Row
 from processing.nc_processor import extract_features
+import sys
 
 def process_data(hurdat_file, raw_dir, processed_dir):
     spark = SparkSession.builder \
@@ -105,7 +106,7 @@ def process_data(hurdat_file, raw_dir, processed_dir):
         )
     )
 
-    # --- 5. SAVE THE FINAL DATA LAKEHOUSE ---
+    # Save the Final Data Lakehouse
     goes_schema = StructType([
         StructField("filename", StringType(), True),
         StructField("mean_radiance", FloatType(), True),
@@ -125,4 +126,6 @@ def process_data(hurdat_file, raw_dir, processed_dir):
 
     print("Pipeline Execution Complete. Parquet Lakehouse created.")
 
+    # Handle Windows specific error
+    sys.stderr = open(os.devnull, 'w')
     spark.stop()

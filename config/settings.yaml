@@ -10,4 +10,4 @@ sources:
   goes_s3:
     bucket_name: "noaa-goes16"
     product_prefix: "ABI-L2-CMIPF/2023/240/12/" # Sample specific day/hour
-    max_files_to_download: 10 # Keep small for M2 Proof of Concept
+    max_files_to_download: 20 # Keep small for validation
