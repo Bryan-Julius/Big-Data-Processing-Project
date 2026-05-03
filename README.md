@@ -1,23 +1,28 @@
 # Scalable Atmospheric Data Pipeline for Global Tropical Hurricane Intensity Forecasting
 
 ## Project Overview
-This project implements an end-to-end Big Data pipeline designed to acquire, process, and analyze meteorological data. It integrates unstructured NetCDF satellite imagery (NOAA GOES-16) with structured tabular tracking data (NHC HURDAT2) into a unified, distributed Data Lakehouse architecture utilizing Apache Spark and Parquet.
+This project implements an end-to-end Big Data pipeline designed to acquire, process, align, and analyze multi-modal meteorological data. It integrates unstructured NetCDF satellite imagery (NOAA GOES-16) with structured tabular tracking data (NHC HURDAT2) into a unified, distributed Data Lakehouse architecture utilizing Apache Spark and Parquet.
+
+A core feature of this architecture is its **spatiotemporal alignment engine**, which utilizes PySpark for strict temporal inner-joins and `pyproj` for dynamic spatial tensor cropping, vastly reducing memory overhead and optimizing feature extraction.
 
 ---
 
-## 1. Pipeline Stages
-The pipeline executes sequentially in three distinct phases without manual intervention:
+## 1. Pipeline Architecture
+The pipeline executes sequentially without manual intervention:
 
 * **Phase 1: Data Acquisition**
     * Connects to the National Hurricane Center (NHC) HTTP server to download historical HURDAT2 text data.
     * Authenticates anonymously with NOAA's public Amazon S3 bucket (`noaa-goes16`) via `boto3` to download Level-2 Cloud and Moisture Imagery (`.nc` NetCDF files).
-    * Saves raw files locally to `data/raw/` (simulating an HDFS ingestion zone).
-* **Phase 2: Distributed Processing (Apache Spark)**
-    * **Tabular Data:** PySpark DataFrames read the raw HURDAT2 text, filter out metadata headers via Regex, cast numerical columns, and engineer a new `category` feature based on the Saffir-Simpson wind scale.
-    * **Imagery Data:** Spark RDDs distribute the NetCDF file paths to parallel worker nodes. Workers utilize `xarray` to open the arrays, extract the `CMI` (Cloud and Moisture Imagery) tensor, and calculate statistical summaries.
-    * **Storage:** Both streams are serialized with Snappy compression and written to `data/processed/` as Parquet files. The tabular data utilizes a multi-level partitioning strategy (`/status/category/`).
-* **Phase 3: Query & Validation Layer**
-    * Initializes a temporary Spark SQL view over the processed Parquet data to execute validation queries, proving data integrity and immediate queryability.
+* **Phase 2: Temporal Alignment (Spark DataFrames)**
+    * Parses historical hurricane tracking data using Native JVM DataFrames.
+    * Extracts metadata from satellite NetCDF filenames (Julian dates/times) and executes a strict Spark Inner Join against the HURDAT2 text records. This guarantees that expensive spatial math is only performed on satellite imagery that has a perfectly matching 6-hour tracking interval (00:00, 06:00, 12:00, 18:00 UTC).
+* **Phase 3: Spatial Cropping & Distributed Processing (Spark RDDs)**
+    * Spark distributes the validated file paths and hurricane coordinates to parallel worker nodes.
+    * Workers utilize `pyproj` to translate standard Earth Latitude/Longitude into GOES-16 Geostationary camera radians.
+    * `xarray` crops the massive 10,848 x 10,848 satellite array down to a highly targeted 10x10 degree bounding box directly over the storm's eye, extracting statistical features (mean and max radiance) while dropping 99% of useless ocean/land data.
+* **Phase 4: The Parquet Data Lakehouse**
+    * Both streams are serialized with Snappy compression and written to `data/processed/`.
+    * The tabular data utilizes a multi-level distributed partitioning strategy (`/status/category/`).
 
 ---
 
@@ -29,19 +34,21 @@ hurricane_pipeline/
 ├── data/
 │   ├── raw/                       # Simulated HDFS ingestion zone (.nc, .txt)
 │   └── processed/                 # Parquet Data Lakehouse
-│       ├── goes_features.parquet/ # Extracted satellite tensors
+│       ├── goes_features.parquet/ # Extracted bounding-box satellite tensors
 │       └── hurdat_features.parquet/# Partitioned tabular data (status/category)
+├── docs/
+│   └── validation.md              # Data quality metrics and edge-case documentation
 ├── src/
 │   ├── fetch/                     # Data acquisition modules
 │   │   ├── fetch_goes.py          # S3 connection and download logic
 │   │   └── fetch_hurdat.py        # HTTP request and API retry logic
 │   ├── processing/                # Distributed processing modules
-│   │   ├── nc_processor.py        # xarray NetCDF extraction via Spark RDDs
-│   │   └── spark_processor.py     # HURDAT2 cleaning and feature engineering
-│   └── main.py                    # End-to-end pipeline orchestrator
-├── .env                           # Environment variables
+│   │   ├── nc_processor.py        # xarray spatial cropping and pyproj math
+│   │   └── spark_processor.py     # Temporal join and Spark orchestration
+│   ├── main.py                    # End-to-end pipeline orchestrator
+│   └── validate_m4.py             # Spark SQL Data Quality validation script
 ├── .gitignore                     # Git tracking exclusions
-├── environment.yml               # Python/Conda environment dependencies
+├── environment.yml                # Python/Conda environment dependencies
 └── README.md                      # Project documentation
 ```
 
@@ -66,15 +73,17 @@ hurricane_pipeline/
    conda activate big-data-env
    ```
 
-**Required Libraries (`requirements.txt`):**
-* `boto3`
-* `requests`
-* `python-dotenv`
-* `pyyaml`
-* `pyspark==3.5.0`
-* `netCDF4==1.6.5`
-* `xarray==2023.10.0`
-* `pandas==2.2.0`
+**Required Libraries (`environment.yml`):**
+- python=3.11
+- requests=2.31.0
+- boto3=1.34.0
+- pandas=2.2.0
+- pyyaml=6.0.1
+- python-dotenv=1.0.1
+- pyspark=3.5.0
+- netcdf4=1.6.5
+- xarray=2023.10.0
+- pyproj
 
 ---
 
@@ -96,13 +105,19 @@ The pipeline is designed to run end-to-end from a single entry point.
 4. ```bash
    conda activate big-data-env
    ```
-4. Execute the main orchestrator:
+5. Execute the main orchestrator to ingest data, perform the temporal join, crop the tensors, and build the Lakehouse:
    ```bash
    python src/main.py
    ```
-4. Monitor the console logs for processing metrics and the final Spark SQL validation tables. Processed output will be available in `data/processed/`.
+6. Monitor the console logs for processing metrics and the final Spark SQL validation tables. Processed output will be available in `data/processed/`.
 
 ---
+
+7. Once the pipeline completes, execute the validation script to spin up a Spark SQL engine, verify data quality, and prove the spatial math succeeded:
+   ```bash
+   python src/validate.py
+   ```
+
 
 ## 6. Data Dictionary (Final Schema)
 
@@ -123,5 +138,5 @@ The pipeline is designed to run end-to-end from a single entry point.
 | Column Name | Data Type | Description |
 | :--- | :--- | :--- |
 | `filename` | String | Original NetCDF source file name. |
-| `mean_radiance` | Float | The mean value extracted from the Level-2 Cloud and Moisture Imagery (CMI) multi-dimensional tensor. |
-| `max_radiance` | Float | The maximum value extracted from the CMI tensor. |
+| `mean_radiance` | Float | The mean radiance extracted strictly from a 10x10 degree bounding box around the storm's center. |
+| `max_radiance` | Float | The maximum radiance extracted from the cropped bounding box. |
