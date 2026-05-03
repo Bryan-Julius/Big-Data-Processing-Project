@@ -1,65 +1,60 @@
 import os
 import xarray as xr
-import logging
-from pyspark.sql.types import StructType, StructField, StringType, FloatType
+from pyspark.sql import Row
+import pyproj
 
-def process_goes_data(spark, raw_dir, processed_dir):
-    """Distributed processing of NetCDF satellite imagery using Spark RDDs."""
-    logging.info("Starting distributed transformation of GOES-16 NetCDF imagery...")
+def extract_features(file_path, lat_decimal, lon_decimal):
+    """
+    Opens a NetCDF file, calculates the bounding box around the hurricane's
+    center coordinates, crops the array, and extracts statistical features.
+    """
+    filename = os.path.basename(file_path)
 
-    #  Gather all .nc files in the local HDFS ingestion zone
-    nc_files = [os.path.join(raw_dir, f) for f in os.listdir(raw_dir) if f.endswith('.nc')]
+    try:
+        # Open dataset
+        ds = xr.open_dataset(file_path, engine='netcdf4')
 
-    if not nc_files:
-        logging.warning("No NetCDF files found to process.")
-        return False
+        # Extract satellite projection metadata
+        proj_info = ds.goes_imager_projection
+        perspective_height = proj_info.perspective_point_height
 
+        # Setup the coordinate transformer (Standard Lat/Lon -> GOES Camera Radians)
+        p_goes = pyproj.Proj(
+            proj='geos', h=perspective_height, lon_0=proj_info.longitude_of_projection_origin,
+            sweep=proj_info.sweep_angle_axis, a=proj_info.semi_major_axis, b=proj_info.semi_minor_axis
+        )
+        p_latlon = pyproj.Proj(proj='latlong', datum='WGS84')
+        transformer = pyproj.Transformer.from_proj(p_latlon, p_goes)
 
-    # Distributed Scaling Architecture
+        # Calculate bounding box (± 5 degrees from storm center)
+        # Convert Lat/Lon to GOES projection meters
+        min_x, max_y = transformer.transform(lon_decimal - 5, lat_decimal + 5)
+        max_x, min_y = transformer.transform(lon_decimal + 5, lat_decimal - 5)
 
-    # Parallelize the file paths across the Spark Cluster
-    # This allows for limitless horizontal scaling if deployed to the cloud
-    paths_rdd = spark.sparkContext.parallelize(nc_files)
+        # Convert projection meters to camera radians for xarray slicing
+        min_x_rad, max_x_rad = min_x / perspective_height, max_x / perspective_height
+        min_y_rad, max_y_rad = min_y / perspective_height, max_y / perspective_height
 
-    def extract_tensors(file_path):
-        """Worker function executed in parallel across the cluster."""
-        try:
-            # Engine 'netcdf4' is required for complex GOES-16 data
-            ds = xr.open_dataset(file_path, engine='netcdf4')
+        # Crop the tensor to the bounding box
+        cropped_ds = ds.sel(
+            x=slice(min_x_rad, max_x_rad),
+            y=slice(max_y_rad, min_y_rad)
+        )
 
-            # Extract the 'CMI' (Radiance) tensor multi-dimensional array
-            radiance = ds['CMI']
+        # Extract features from ONLY the cropped hurricane area
+        cmi_tensor = cropped_ds['CMI']
+        mean_radiance = float(cmi_tensor.mean().values)
+        max_radiance = float(cmi_tensor.max().values)
 
-            # To avoid memory bottlenecks, we extract statistical summary tensors
-            # to serve as ML features, rather than storing raw 2000x2000 arrays.
-            mean_rad = float(radiance.mean().values)
-            max_rad = float(radiance.max().values)
+        ds.close()
 
-            filename = os.path.basename(file_path)
-            ds.close()
-            return (filename, mean_rad, max_rad, "VALID")
-        except Exception as e:
-            # Robust Error Handling: Catch corrupted files without crashing the cluster
-            return (os.path.basename(file_path), 0.0, 0.0, f"ERROR: {str(e)}")
+        return Row(
+            filename=filename,
+            mean_radiance=mean_radiance,
+            max_radiance=max_radiance
+        )
 
-    #  Execute the distributed Map transformation
-    processed_rdd = paths_rdd.map(extract_tensors)
-
-    #  Enforce Schema and Convert back to DataFrame
-    schema = StructType([
-        StructField("filename", StringType(), True),
-        StructField("mean_radiance", FloatType(), True),
-        StructField("max_radiance", FloatType(), True),
-        StructField("status", StringType(), True)
-    ])
-    goes_df = spark.createDataFrame(processed_rdd, schema)
-
-    #  Filter out corrupted images identified by the worker nodes
-    valid_goes_df = goes_df.filter(goes_df.status == "VALID").drop("status")
-
-    #  Save the extracted image features to the Parquet Data Lake
-    target_path = os.path.join(processed_dir, "goes_features.parquet")
-    valid_goes_df.write.mode("overwrite").parquet(target_path)
-
-    logging.info(f"Successfully extracted NetCDF tensors and saved Parquet to: {target_path}")
-    return True
+    except Exception as e:
+        # If the math fails (e.g., storm is off the edge of the satellite image)
+        print(f"Error processing {filename}: {e}")
+        return Row(filename=filename, mean_radiance=-1.0, max_radiance=-1.0)

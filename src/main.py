@@ -4,15 +4,19 @@ os.environ['HADOOP_HOME'] = 'C:\\hadoop'
 os.environ['PATH'] = 'C:\\hadoop\\bin;' + os.environ['PATH']
 os.environ['PYSPARK_PYTHON'] = sys.executable
 os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
+
+src_path = os.path.abspath("src")
+sys.path.insert(0, src_path)
+os.environ['PYTHONPATH'] = src_path
+
 import yaml
 import logging
 from dotenv import load_dotenv
 
-# Import our custom modules
+# Import custom modules
 from fetch.fetch_hurdat import download_hurdat_data
 from fetch.fetch_goes import download_sample_goes_data
-from processing.spark_processor import create_spark_session, process_hurdat_data, query_data_lake
-from processing.nc_processor import process_goes_data
+from processing.spark_processor import process_data
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -37,8 +41,7 @@ def main():
     processed_path = config['storage']['processed_data_path']
 
 
-    # First phase get data
-
+    # Phase 1: Get data
     logging.info(" Phase 1: Get data")
     hurdat_cfg = config['sources']['hurdat']
     goes_cfg = config['sources']['goes_s3']
@@ -52,34 +55,19 @@ def main():
     )
 
 
-    # 2nd phase spark processing and data models
-
-    logging.info(" 2nd Phase: Processing (SPARK)")
-    spark = create_spark_session()
-
-    # Process HURDAT2
+    # Phase 2 & 3: Distributed Processing (Temporal Join & Spatial Cropping)
+    logging.info(" Phase 2 & 3: Processing (SPARK Temporal Join & Spatial Cropping)")
     hurdat_input = os.path.join(raw_path, hurdat_cfg['filename'])
-    process_hurdat_data(spark, hurdat_input, processed_path)
 
-    # Process GOES-16 Imagery
-    process_goes_data(spark, raw_path, processed_path)
+    # This single orchestrator function now spins up Spark, joins the tables,
+    # distributes the pyproj math, saves the Parquet Lakehouse, and shuts Spark down.
+    process_data(
+        hurdat_file=hurdat_input,
+        raw_dir=raw_path,
+        processed_dir=processed_path
+    )
 
-    # 3rd Phase Query layer (Spark SQL)
-
-    logging.info(" 3rd Phase: Query Layer")
-    query_data_lake(spark, processed_path)
-
-    # Verify GOES data exists
-    goes_parquet = os.path.join(processed_path, "goes_features.parquet")
-    if os.path.exists(goes_parquet):
-        spark.read.parquet(goes_parquet).show(truncate=False)
-
-    # Shut down the Spark cluster cleanly
-    spark.stop()
-
-    # Shut down the Spark cluster cleanly
-    spark.stop()
-    logging.info(" Pipeline Execution Complete. Data is processed and persisted in Data Lake.")
+    logging.info(" Pipeline Execution Complete. Data is processed and persisted in Data Lakehouse.")
 
 if __name__ == "__main__":
     main()
